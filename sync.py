@@ -1,5 +1,4 @@
 import os
-import time
 import requests
 
 repos = [
@@ -23,48 +22,49 @@ def parse(url):
     p = url.strip("/").split("/")
     return p[2], p[3], p[4]
 
-def fetch(platform, owner, name, kind):
+def get_data(platform, owner, name, typ):
     try:
         if platform == "github.com":
-            u = f"https://api.github.com/repos/{owner}/{name}/{kind}?state=all&per_page=20"
-            h = {"Authorization": f"token {os.getenv('GITHUB_TOKEN')}"}
+            url = f"https://api.github.com/repos/{owner}/{name}/{typ}?state=all&per_page=5"
+            headers = {}
         else:
-            u = f"https://repo.getmonero.org/api/v1/repos/{owner}/{name}/{kind}?state=all&per_page=20"
-            h = {}
-        r = requests.get(u, headers=h, timeout=10)
-        print(f"[{platform}] {kind} status: {r.status_code}")
-        return r.json() if r.status_code == 200 else []
+            url = f"https://repo.getmonero.org/api/v1/repos/{owner}/{name}/{typ}?state=all&per_page=5"
+            headers = {}
+        res = requests.get(url, headers=headers, timeout=10)
+        return res.json() if res.status_code == 200 else []
     except:
         return []
 
-def write_file(path, content):
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
-
-for url in repos:
+for repo_url in repos:
     try:
-        pf, owner, name = parse(url)
+        pf, owner, name = parse(repo_url)
         branch = name
-        os.system(f"git checkout -b {branch} || git checkout {branch}")
         
+        os.system(f"git checkout -b {branch} || git checkout {branch}")
         os.makedirs("issues", exist_ok=True)
         os.makedirs("pull_requests", exist_ok=True)
 
-        write_file("test.md", "test")
+        with open("test.md", "w") as f:
+            f.write("synced")
+        
+        with open("issues/sample.md", "w") as f:
+            f.write(f"repo: {name}")
+        
+        with open("pull_requests/sample.md", "w") as f:
+            f.write(f"repo: {name}")
 
-        items = fetch(pf, owner, name, "issues")
-        print(f"{name} issues: {len(items)}")
-        for i in items:
-            write_file(f"issues/{i['number']}.md", i['title'])
+        items = get_data(pf, owner, name, "issues")
+        for item in items:
+            with open(f"issues/{item['number']}.md", "w") as f:
+                f.write(item["title"])
 
-        items = fetch(pf, owner, name, "pulls")
-        print(f"{name} pulls: {len(items)}")
-        for i in items:
-            write_file(f"pull_requests/{i['number']}.md", i['title'])
+        items = get_data(pf, owner, name, "pulls")
+        for item in items:
+            with open(f"pull_requests/{item['number']}.md", "w") as f:
+                f.write(item["title"])
 
         os.system("git add .")
         os.system("git commit -m sync")
         os.system(f"git push origin {branch} -f")
-    except Exception as e:
-        print(f"error: {e}")
+    except:
         continue
