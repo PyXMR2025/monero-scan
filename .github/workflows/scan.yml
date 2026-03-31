@@ -14,9 +14,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          
-      - run: git config --global user.name "bot"
-      - run: git config --global user.email "bot@github.com"
+
+      - run: git config --global user.name "sync-bot"
+      - run: git config --global user.email "bot@example.com"
 
       - run: pip install requests
       - run: python sync.py
