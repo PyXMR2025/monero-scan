@@ -1,6 +1,5 @@
 import os
 import time
-import git
 import requests
 from datetime import datetime, timezone
 
@@ -25,38 +24,38 @@ def parse(url):
     p = url.strip('/').split('/')
     return p[2], p[3], p[4]
 
-def headers(platform):
-    if platform == "github.com":
-        return {"Authorization": f"token {os.getenv('GITHUB_TOKEN')}"}
-    return {}
-
 def fetch(platform, owner, name, kind):
     items = []
     page = 1
-    while True:
-        if platform == "github.com":
-            u = f"https://api.github.com/repos/{owner}/{name}/{kind}?state=all&per_page=100&page={page}"
-        else:
-            u = f"https://repo.getmonero.org/api/v1/repos/{owner}/{name}/{kind}?state=all&per_page=100&page={page}"
-        r = requests.get(u, headers=headers(platform), timeout=20)
-        if r.status_code != 200:
+    for _ in range(5):
+        try:
+            if platform == "github.com":
+                u = f"https://api.github.com/repos/{owner}/{name}/{kind}?state=all&per_page=100&page={page}"
+                h = {"Authorization": f"token {os.getenv('GITHUB_TOKEN')}"}
+            else:
+                u = f"https://repo.getmonero.org/api/v1/repos/{owner}/{name}/{kind}?state=all&per_page=100&page={page}"
+                h = {}
+            r = requests.get(u, headers=h, timeout=10)
+            if r.status_code != 200:
+                break
+            data = r.json()
+            if not data:
+                break
+            items.extend(data)
+            page +=1
+            time.sleep(0.3)
+        except:
             break
-        data = r.json()
-        if not data:
-            break
-        items.extend(data)
-        page += 1
-        time.sleep(0.5)
     return items
 
-def render(item, repo_url, kind):
-    tz = datetime.now(timezone.utc).isoformat(timespec="seconds") + "Z"
+def build(item, repo_url, kind):
+    t = datetime.now(timezone.utc).isoformat(timespec="seconds")+"Z"
     num = item["number"]
     title = item["title"]
     status = item["state"]
     link = item["html_url"]
-    created = item["created_at"]
     author = item["user"]["login"]
+    created = item["created_at"]
     body = item.get("body") or ""
 
     if kind == "pulls":
@@ -64,14 +63,13 @@ def render(item, repo_url, kind):
             status = "merged"
         if item.get("draft"):
             status = f"draft/{status}"
-
-    type_str = "Issue" if kind == "issues" else "PullRequest"
-
+    
+    typ = "Issue" if kind == "issues" else "PullRequest"
     return f"""---
 original_url: {link}
-sync_time: {tz}
+sync_time: {t}
 repo_url: {repo_url}
-type: {type_str}
+type: {typ}
 status: {status}
 number: {num}
 title: {title}
@@ -85,42 +83,27 @@ status: {status}
 {body}
 """
 
-def main():
-    local = git.Repo(".")
-    for url in repos:
-        try:
-            platform, owner, name = parse(url)
-            branch = name
-            print(f"Processing {name}")
+def git(cmd):
+    os.system(cmd)
 
-            if branch in local.branches:
-                local.git.checkout(branch)
-            else:
-                local.git.checkout("-b", branch)
+for url in repos:
+    try:
+        platform, owner, name = parse(url)
+        branch = name
+        git(f"git checkout -b {branch} || git checkout {branch}")
+        os.makedirs("issues", exist_ok=True)
+        os.makedirs("pull_requests", exist_ok=True)
 
-            os.makedirs("issues", exist_ok=True)
-            os.makedirs("pull_requests", exist_ok=True)
+        for i in fetch(platform, owner, name, "issues"):
+            with open(f"issues/{i['number']}.md", "w", encoding="utf-8") as f:
+                f.write(build(i, url, "issues"))
 
-            issues = fetch(platform, owner, name, "issues")
-            for i in issues:
-                path = f"issues/{i['number']}.md"
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(render(i, url, "issues"))
+        for pr in fetch(platform, owner, name, "pulls"):
+            with open(f"pull_requests/{pr['number']}.md", "w", encoding="utf-8") as f:
+                f.write(build(pr, url, "pulls"))
 
-            prs = fetch(platform, owner, name, "pulls")
-            for pr in prs:
-                path = f"pull_requests/{pr['number']}.md"
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(render(pr, url, "pulls"))
-
-            local.git.add(".")
-            try:
-                local.git.commit(m=f"Sync {name}")
-                local.git.push("origin", branch)
-            except git.exc.GitCommandError:
-                pass
-        except Exception as e:
-            print(f"Failed {name}: {e}")
-
-if __name__ == "__main__":
-    main()
+        git("git add .")
+        git(f'git commit -m "Sync {branch}"')
+        git(f"git push origin {branch} -f")
+    except:
+        continue
